@@ -27,32 +27,53 @@ def scrape_to_excel(
     """
     session = create_session(user_agent=user_agent, total_retries=retries)
 
+    print("[1/3] Определение типа страницы и сбор ссылок…", flush=True)
     final_url, html = fetch_html(url, session=session)
     is_product_page, product_links = discover_product_links(final_url, html, max_links=limit)
 
     products: List[Product] = []
     if is_product_page or not product_links:
+        total = 1
+        print(f"Найдено: страница товара. Всего к обработке: {total}", flush=True)
+        print(f"[1/{total}] Обработка: {final_url} (осталось: {total-1})", flush=True)
         product = extract_product(final_url, html)
         if product:
             products.append(product)
+            print(f"[1/{total}] Успешно", flush=True)
+        else:
+            print(f"[1/{total}] Не удалось извлечь данные", flush=True)
     else:
+        total = min(limit, len(product_links))
+        print(f"Найдено ссылок на товары: {len(product_links)}. Будет обработано: {total}", flush=True)
         seen = set()
-        for idx, link in enumerate(product_links, start=1):
+        processed = 0
+        for idx_raw, link in enumerate(product_links, start=1):
             if link in seen:
                 continue
             seen.add(link)
             try:
+                current = processed + 1
+                if current > total:
+                    break
+                remaining = total - current
+                print(f"[{current}/{total}] Обработка: {link} (осталось: {remaining})", flush=True)
                 _, p_html = fetch_html(link, session=session, pause_seconds=delay)
                 product = extract_product(link, p_html)
                 if product:
                     products.append(product)
+                    print(f"[{current}/{total}] Успешно", flush=True)
+                else:
+                    print(f"[{current}/{total}] Не удалось извлечь данные", flush=True)
+                processed += 1
             except Exception as exc:
                 print(f"[warn] failed to fetch/extract {link}: {exc}", file=sys.stderr)
 
             if len(products) >= limit:
                 break
 
+    print("[2/3] Сохранение в Excel…", flush=True)
     write_products_to_excel(products, out_path=out_path, template_path=template_path)
+    print("[3/3] Готово к завершению", flush=True)
     return products
 
 
@@ -125,12 +146,13 @@ def main(argv: Optional[list[str]] = None) -> int:
             user_agent=args.user_agent,
             retries=args.retries,
         )
-        print(f"Готово. Сохранено товаров: {len(products)} -> {args.out_path}")
+        print(f"Парсинг успешно завершён. Сохранено товаров: {len(products)}")
+        print(f"Файл: {args.out_path}")
         return 0
     except KeyboardInterrupt:
         print("Прервано пользователем", file=sys.stderr)
         return 130
     except Exception as exc:
-        print(f"Ошибка: {exc}", file=sys.stderr)
+        print(f"Ошибка парсинга: {exc}", file=sys.stderr)
         return 1
 
